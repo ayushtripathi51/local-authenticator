@@ -1,5 +1,6 @@
 node_modules/
 dist/
+totp-extension.zip
 test-results/
 playwright-report/
 coverage/
