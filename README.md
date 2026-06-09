@@ -10,6 +10,7 @@ A standalone Chrome extension for generating TOTP codes from a popup. It is desi
 - Copy code button.
 - Search, edit, and delete accounts.
 - Encrypted vault with password setup and unlock screen.
+- Optional platform biometric/passkey unlock for the active 24-hour session.
 - Manual lock button.
 - 24-hour unlock session using `chrome.storage.session`.
 
@@ -22,6 +23,7 @@ A standalone Chrome extension for generating TOTP codes from a popup. It is desi
 - The password is not stored.
 - Decrypted secrets live in popup memory only while unlocked.
 - The 24-hour convenience unlock stores exported vault key material in `chrome.storage.session`, not the raw password. It is cleared by manual lock, expiry, browser restart, extension reload, update, or disable.
+- Biometric/passkey unlock uses WebAuthn with a platform authenticator and no explicit RP ID, which is the supported pattern for extension origins. It gates use of the cached 24-hour unlock key; after the session expires or manual lock clears it, the password is required again.
 - Clipboard copy writes only the current TOTP code, not the secret.
 
 ## Install From Source

@@ -103,11 +103,10 @@ h2 {
 }
 
 .add-button,
+.biometric-button,
 .lock-button,
 .square-button,
 .icon-button {
-  display: grid;
-  place-items: center;
   border: 0;
 }
 
@@ -115,7 +114,29 @@ h2 {
   gap: 8px;
 }
 
+.biometric-button {
+  display: inline-flex;
+  width: 58px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 8px;
+  color: #137333;
+  background: #e6f4ea;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.biometric-button:disabled {
+  cursor: not-allowed;
+  color: #80868b;
+  background: #eef1f5;
+}
+
 .add-button {
+  display: grid;
+  place-items: center;
   width: 42px;
   height: 42px;
   border-radius: 8px;
@@ -125,6 +146,8 @@ h2 {
 }
 
 .lock-button {
+  display: grid;
+  place-items: center;
   width: 42px;
   height: 42px;
   border-radius: 8px;
@@ -219,6 +242,8 @@ h2 {
 }
 
 .icon-button {
+  display: grid;
+  place-items: center;
   width: 30px;
   height: 30px;
   border-radius: 8px;

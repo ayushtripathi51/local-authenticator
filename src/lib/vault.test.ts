@@ -3,6 +3,7 @@ import type { TotpAccount } from "./accounts";
 import {
   addVaultAccount,
   createVault,
+  getBiometricVaultStatus,
   getVaultStatus,
   lockVault,
   unlockFromSession,
@@ -11,6 +12,7 @@ import {
   LEGACY_ACCOUNTS_KEY,
   SESSION_STORAGE_KEY
 } from "./vault";
+import { BIOMETRIC_STORAGE_KEY } from "./biometric";
 
 const localStorageArea = new Map<string, unknown>();
 const sessionStorageArea = new Map<string, unknown>();
@@ -82,6 +84,21 @@ describe("encrypted vault", () => {
 
     vi.setSystemTime(new Date("2026-06-09T00:00:01.000Z"));
     await expect(unlockFromSession()).rejects.toThrow("Vault is locked");
+  });
+
+  test("reports biometric lock when enrolled and the session key is still cached", async () => {
+    vi.setSystemTime(new Date("2026-06-08T00:00:00.000Z"));
+    await createVault("password", []);
+    localStorageArea.set(BIOMETRIC_STORAGE_KEY, {
+      credentialId: "AQIDBA",
+      label: "Authenticator vault",
+      createdAt: Date.now()
+    });
+
+    await expect(getBiometricVaultStatus()).resolves.toEqual({
+      state: "biometric-locked",
+      biometricAvailable: false
+    });
   });
 
   test("migrates legacy plaintext accounts and removes the plaintext key", async () => {

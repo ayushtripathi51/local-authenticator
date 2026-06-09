@@ -1,12 +1,12 @@
 {
   "name": "totp-extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
-    "package:extension": "npm run build && cd dist && zip -r ../totp-extension.zip .",
+    "package:extension": "npm run build && rm -f totp-extension.zip && cd dist && zip -r ../totp-extension.zip .",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:e2e": "playwright test"

@@ -25,6 +25,25 @@ test("renders popup and creates a TOTP account from an otpauth URI", async ({ pa
         }
       }
     });
+    Object.defineProperty(window, "PublicKeyCredential", {
+      configurable: true,
+      value: {
+        isUserVerifyingPlatformAuthenticatorAvailable: async () => true
+      }
+    });
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: {
+        create: async () => ({
+          type: "public-key",
+          rawId: new Uint8Array([1, 2, 3, 4]).buffer
+        }),
+        get: async () => ({
+          type: "public-key",
+          rawId: new Uint8Array([1, 2, 3, 4]).buffer
+        })
+      }
+    });
   });
 
   await page.goto("/");
@@ -52,6 +71,9 @@ test("renders popup and creates a TOTP account from an otpauth URI", async ({ pa
   await expect(page.getByText("Example").first()).toBeVisible();
   await expect(page.getByText("alice@example.com")).toBeVisible();
   await expect(page.locator(".account-card__code")).toHaveText(/\d{3} \d{3}/);
+  await expect(page.getByRole("button", { name: "Enable biometric unlock" })).toBeVisible();
+  await page.getByRole("button", { name: "Enable biometric unlock" }).click();
+  await expect(page.getByRole("button", { name: "Disable biometric unlock" })).toBeVisible();
 
   await page.getByRole("button", { name: "Lock vault" }).click();
   await expect(page.getByRole("heading", { name: "Unlock vault" })).toBeVisible();
