@@ -61,11 +61,11 @@ describe("biometric unlock", () => {
   });
 
   test("enrolls a platform credential without storing vault secrets", async () => {
-    const enrollment = await enableBiometricUnlock("Authenticator vault");
+    const enrollment = await enableBiometricUnlock("Local Authenticator vault");
 
     expect(enrollment).toMatchObject({
       credentialId: "AQIDBA",
-      label: "Authenticator vault"
+      label: "Local Authenticator vault"
     });
     expect(String(localStorageArea.get(BIOMETRIC_STORAGE_KEY))).not.toContain("JBSWY3DPEHPK3PXP");
     expect(navigator.credentials.create).toHaveBeenCalledWith({
@@ -74,17 +74,17 @@ describe("biometric unlock", () => {
           authenticatorAttachment: "platform",
           userVerification: "required"
         }),
-        rp: { name: "Standalone Authenticator" },
+        rp: { name: "Local Authenticator" },
         user: expect.objectContaining({
-          displayName: "Authenticator vault",
-          name: "Authenticator vault"
+          displayName: "Local Authenticator vault",
+          name: "Local Authenticator vault"
         })
       })
     });
   });
 
   test("authenticates only the enrolled credential id", async () => {
-    await enableBiometricUnlock("Authenticator vault");
+    await enableBiometricUnlock("Local Authenticator vault");
 
     await expect(authenticateBiometricUnlock()).resolves.toEqual({
       credentialId: "AQIDBA",
@@ -99,7 +99,7 @@ describe("biometric unlock", () => {
   });
 
   test("rejects if the authenticator returns a different credential", async () => {
-    await enableBiometricUnlock("Authenticator vault");
+    await enableBiometricUnlock("Local Authenticator vault");
     vi.mocked(navigator.credentials.get).mockResolvedValue(
       credential(new Uint8Array([9, 9, 9, 9])) as Credential
     );
@@ -108,7 +108,7 @@ describe("biometric unlock", () => {
   });
 
   test("removes the enrollment", async () => {
-    await enableBiometricUnlock("Authenticator vault");
+    await enableBiometricUnlock("Local Authenticator vault");
 
     await disableBiometricUnlock();
 

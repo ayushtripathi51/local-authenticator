@@ -91,7 +91,7 @@ describe("encrypted vault", () => {
     await createVault("password", []);
     localStorageArea.set(BIOMETRIC_STORAGE_KEY, {
       credentialId: "AQIDBA",
-      label: "Authenticator vault",
+      label: "Local Authenticator vault",
       createdAt: Date.now()
     });
 

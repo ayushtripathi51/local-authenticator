@@ -173,7 +173,7 @@ export function App() {
         await disableBiometricUnlock();
         setBiometricEnabled(false);
       } else {
-        await enableBiometricUnlock("Authenticator vault");
+        await enableBiometricUnlock("Local Authenticator vault");
         setBiometricEnabled(true);
       }
       setError("");
@@ -220,7 +220,7 @@ export function App() {
           <div className="lock-panel__icon">
             <ShieldCheck size={30} />
           </div>
-          <h1>Authenticator</h1>
+          <h1>Local Authenticator</h1>
           <p>Loading vault</p>
         </section>
       </main>
@@ -256,8 +256,8 @@ export function App() {
             <ShieldCheck size={22} />
           </span>
           <div>
-            <h1>Authenticator</h1>
-            <p>Local TOTP codes</p>
+            <h1>Local Authenticator</h1>
+            <p>Private TOTP vault</p>
           </div>
         </div>
         <div className="app-actions">

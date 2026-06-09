@@ -3,6 +3,11 @@ import { existsSync } from "node:fs";
 import manifest from "../manifest.json";
 
 describe("extension manifest icons", () => {
+  test("uses the public product name in extension metadata", () => {
+    expect(manifest.name).toBe("Local Authenticator: Private TOTP Vault");
+    expect(manifest.action.default_title).toBe("Local Authenticator");
+  });
+
   test("declares raster PNG icons for Chrome toolbar and extension list", () => {
     const expectedIcons = {
       "16": "icons/icon-16.png",

@@ -11,7 +11,7 @@ export type BiometricAuthentication = {
   verifiedAt: number;
 };
 
-const RP_NAME = "Standalone Authenticator";
+const RP_NAME = "Local Authenticator";
 
 export async function isBiometricUnlockAvailable(): Promise<boolean> {
   const credentialApi = globalThis.PublicKeyCredential;

@@ -1,6 +1,6 @@
-# Standalone Authenticator
+# Local Authenticator: Private TOTP Vault
 
-A standalone Chrome extension for generating TOTP codes from a popup. It is designed to stay isolated from websites: no content scripts, no host permissions, no background page, and no website messaging surface.
+A standalone Chrome extension for generating private 2FA codes from an encrypted local TOTP vault. It is designed to stay isolated from websites: no content scripts, no host permissions, no background page, and no website messaging surface.
 
 ## Features
 
