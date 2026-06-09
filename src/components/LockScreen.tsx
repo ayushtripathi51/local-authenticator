@@ -61,7 +61,7 @@ export function LockScreen({
         <div className="lock-panel__icon">
           {isCreate ? <ShieldCheck size={30} /> : <Lock size={30} />}
         </div>
-        <h1>{mode === "unlock" ? "Unlock vault" : "Create password"}</h1>
+        <h1>{isCreate ? "Create password" : "Unlock vault"}</h1>
         <p>
           {mode === "migrate"
             ? `${legacyCount} saved code${legacyCount === 1 ? "" : "s"} will be encrypted into your vault.`
@@ -114,7 +114,7 @@ export function LockScreen({
 
           <button className="primary-button" type="submit" disabled={submitting}>
             <KeyRound size={18} />
-            {submitting ? "Working" : mode === "unlock" ? "Unlock" : "Create vault"}
+            {submitting ? "Working" : isCreate ? "Create vault" : "Unlock"}
           </button>
         </form>
       </section>

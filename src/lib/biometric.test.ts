@@ -30,7 +30,14 @@ function credential(id: Uint8Array) {
   return {
     id: "credential-id",
     rawId: id.buffer.slice(id.byteOffset, id.byteOffset + id.byteLength),
-    type: "public-key"
+    type: "public-key",
+    getClientExtensionResults: () => ({
+      prf: {
+        results: {
+          first: new Uint8Array([5, 6, 7, 8]).buffer
+        }
+      }
+    })
   } as PublicKeyCredential;
 }
 
@@ -61,18 +68,27 @@ describe("biometric unlock", () => {
   });
 
   test("enrolls a platform credential without storing vault secrets", async () => {
-    const enrollment = await enableBiometricUnlock("Local Authenticator vault");
+    const enrollment = await enableBiometricUnlock("Local Authenticator vault", "exported-key");
 
     expect(enrollment).toMatchObject({
       credentialId: "AQIDBA",
-      label: "Local Authenticator vault"
+      label: "Local Authenticator vault",
+      prfSalt: expect.any(String),
+      wrappedKey: expect.any(String)
     });
-    expect(String(localStorageArea.get(BIOMETRIC_STORAGE_KEY))).not.toContain("JBSWY3DPEHPK3PXP");
+    expect(String(localStorageArea.get(BIOMETRIC_STORAGE_KEY))).not.toContain("exported-key");
     expect(navigator.credentials.create).toHaveBeenCalledWith({
       publicKey: expect.objectContaining({
         authenticatorSelection: expect.objectContaining({
           authenticatorAttachment: "platform",
           userVerification: "required"
+        }),
+        extensions: expect.objectContaining({
+          prf: expect.objectContaining({
+            eval: expect.objectContaining({
+              first: expect.any(ArrayBuffer)
+            })
+          })
         }),
         rp: { name: "Local Authenticator" },
         user: expect.objectContaining({
@@ -84,22 +100,30 @@ describe("biometric unlock", () => {
   });
 
   test("authenticates only the enrolled credential id", async () => {
-    await enableBiometricUnlock("Local Authenticator vault");
+    await enableBiometricUnlock("Local Authenticator vault", "exported-key");
 
     await expect(authenticateBiometricUnlock()).resolves.toEqual({
       credentialId: "AQIDBA",
+      exportedKeyString: "exported-key",
       verifiedAt: expect.any(Number)
     });
     expect(navigator.credentials.get).toHaveBeenCalledWith({
       publicKey: expect.objectContaining({
         allowCredentials: [{ id: expect.any(ArrayBuffer), type: "public-key" }],
+        extensions: expect.objectContaining({
+          prf: expect.objectContaining({
+            eval: expect.objectContaining({
+              first: expect.any(ArrayBuffer)
+            })
+          })
+        }),
         userVerification: "required"
       })
     });
   });
 
   test("rejects if the authenticator returns a different credential", async () => {
-    await enableBiometricUnlock("Local Authenticator vault");
+    await enableBiometricUnlock("Local Authenticator vault", "exported-key");
     vi.mocked(navigator.credentials.get).mockResolvedValue(
       credential(new Uint8Array([9, 9, 9, 9])) as Credential
     );
@@ -108,10 +132,24 @@ describe("biometric unlock", () => {
   });
 
   test("removes the enrollment", async () => {
-    await enableBiometricUnlock("Local Authenticator vault");
+    await enableBiometricUnlock("Local Authenticator vault", "exported-key");
 
     await disableBiometricUnlock();
 
     await expect(getBiometricEnrollment()).resolves.toBeNull();
+  });
+
+  test("rejects durable enrollment when the authenticator does not return a PRF key", async () => {
+    vi.mocked(navigator.credentials.create).mockResolvedValue({
+      id: "credential-id",
+      rawId: new Uint8Array([1, 2, 3, 4]).buffer,
+      type: "public-key",
+      getClientExtensionResults: () => ({})
+    } as PublicKeyCredential);
+
+    await expect(enableBiometricUnlock("Local Authenticator vault", "exported-key")).rejects.toThrow(
+      "Biometric key wrapping is not available on this device"
+    );
+    expect(localStorageArea.has(BIOMETRIC_STORAGE_KEY)).toBe(false);
   });
 });

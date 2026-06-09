@@ -1,11 +1,15 @@
-import { Link, Save, X } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { Camera, Link, Save, Upload, X } from "lucide-react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import type { TotpAccount, TotpAccountInput } from "../lib/accounts";
+import { parseGoogleAuthenticatorMigrationUri } from "../lib/googleAuthenticator";
+import { decodeQrFromCanvas, decodeQrFromImageFile } from "../lib/qr";
 import { decodeBase32, parseOtpAuthUri, sanitizeSecret } from "../lib/totp";
 
 type AccountFormProps = {
   editingAccount: TotpAccount | null;
+  autoStartCamera?: boolean;
   onSave: (input: TotpAccountInput) => Promise<void>;
+  onImportMany: (inputs: TotpAccountInput[]) => Promise<void>;
   onCancel: () => void;
 };
 
@@ -18,11 +22,22 @@ const DEFAULT_FORM: TotpAccountInput = {
   algorithm: "SHA1"
 };
 
-export function AccountForm({ editingAccount, onSave, onCancel }: AccountFormProps) {
+export function AccountForm({
+  editingAccount,
+  autoStartCamera = false,
+  onSave,
+  onImportMany,
+  onCancel
+}: AccountFormProps) {
   const [form, setForm] = useState<TotpAccountInput>(DEFAULT_FORM);
   const [uri, setUri] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [cameraScanning, setCameraScanning] = useState(false);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (editingAccount) {
@@ -42,14 +57,147 @@ export function AccountForm({ editingAccount, onSave, onCancel }: AccountFormPro
     setError("");
   }, [editingAccount]);
 
-  function importUri() {
+  useEffect(() => {
+    if (!videoRef.current || !cameraStream) {
+      return;
+    }
+    videoRef.current.srcObject = cameraStream;
+    void videoRef.current.play();
+  }, [cameraStream]);
+
+  useEffect(() => {
+    if (!cameraScanning) {
+      return;
+    }
+
+    let stopped = false;
+    let frame = 0;
+    const scan = async () => {
+      if (stopped || !videoRef.current || !canvasRef.current) {
+        return;
+      }
+      const video = videoRef.current;
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        const canvas = canvasRef.current;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (context && canvas.width > 0 && canvas.height > 0) {
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          try {
+            const scanned = decodeQrFromCanvas(canvas);
+            stopped = true;
+            stopCamera();
+            await importText(scanned);
+            return;
+          } catch {
+            // No QR in this frame yet.
+          }
+        }
+      }
+      frame = window.requestAnimationFrame(scan);
+    };
+
+    frame = window.requestAnimationFrame(scan);
+    return () => {
+      stopped = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [cameraScanning]);
+
+  useEffect(() => () => stopCamera(), []);
+
+  useEffect(() => {
+    if (autoStartCamera && !editingAccount && !cameraScanning && !cameraBusy) {
+      void startInlineCamera();
+    }
+  }, [autoStartCamera, editingAccount]);
+
+  async function importUri() {
+    await importText(uri);
+  }
+
+  async function importText(input: string) {
     try {
-      const parsed = parseOtpAuthUri(uri);
+      const trimmed = input.trim();
+      if (trimmed.startsWith("otpauth-migration://")) {
+        const parsed = parseGoogleAuthenticatorMigrationUri(trimmed);
+        await onImportMany(parsed);
+        setUri("");
+        setError("");
+        return;
+      }
+      const parsed = parseOtpAuthUri(trimmed);
       setForm(parsed);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not parse otpauth URI");
+      setError(err instanceof Error ? err.message : "Could not import code");
     }
+  }
+
+  async function importImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) {
+      return;
+    }
+    try {
+      const scanned = await decodeQrFromImageFile(file);
+      await importText(scanned);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not scan QR image");
+    }
+  }
+
+  async function startCamera() {
+    if (isExtensionPopup()) {
+      await openCameraScannerWindow();
+      return;
+    }
+    await startInlineCamera();
+  }
+
+  async function startInlineCamera() {
+    setError("");
+    setCameraBusy(true);
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Camera scanning is not available in this browser");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false
+      });
+      setCameraStream(stream);
+      setCameraScanning(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open camera");
+    } finally {
+      setCameraBusy(false);
+    }
+  }
+
+  async function openCameraScannerWindow() {
+    const scannerURL = chrome.runtime.getURL("index.html?camera=1");
+    if (chrome.windows?.create) {
+      await chrome.windows.create({
+        url: scannerURL,
+        type: "popup",
+        width: 430,
+        height: 700,
+        focused: true
+      });
+      return;
+    }
+    window.open(scannerURL, "_blank", "popup,width=430,height=700");
+  }
+
+  function stopCamera() {
+    setCameraScanning(false);
+    setCameraStream((stream) => {
+      stream?.getTracks().forEach((track) => track.stop());
+      return null;
+    });
   }
 
   async function submit(event: FormEvent) {
@@ -82,12 +230,12 @@ export function AccountForm({ editingAccount, onSave, onCancel }: AccountFormPro
       </div>
 
       <label className="field">
-        <span>Paste setup key URL</span>
+        <span>Paste setup key URL or Google export URI</span>
         <div className="field-row">
           <input
             value={uri}
             onChange={(event) => setUri(event.target.value)}
-            placeholder="otpauth://totp/Issuer:name?secret=..."
+            placeholder="otpauth://totp/... or otpauth-migration://..."
             autoComplete="off"
           />
           <button type="button" className="square-button" onClick={importUri} aria-label="Import URL">
@@ -95,6 +243,32 @@ export function AccountForm({ editingAccount, onSave, onCancel }: AccountFormPro
           </button>
         </div>
       </label>
+
+      {!editingAccount ? (
+        <div className="qr-import">
+          <label className="secondary-button">
+            <Upload size={17} />
+            Upload QR image
+            <input type="file" accept="image/*" onChange={importImage} />
+          </label>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={cameraScanning ? stopCamera : startCamera}
+            disabled={cameraBusy}
+          >
+            <Camera size={17} />
+            {cameraScanning ? "Stop camera" : cameraBusy ? "Opening" : "Scan camera"}
+          </button>
+        </div>
+      ) : null}
+
+      {cameraScanning ? (
+        <div className="camera-preview">
+          <video ref={videoRef} muted playsInline />
+          <canvas ref={canvasRef} hidden />
+        </div>
+      ) : null}
 
       <div className="form-grid">
         <label className="field">
@@ -174,4 +348,8 @@ export function AccountForm({ editingAccount, onSave, onCancel }: AccountFormPro
       </button>
     </form>
   );
+}
+
+function isExtensionPopup() {
+  return typeof chrome !== "undefined" && !!chrome.runtime?.id && window.location.search !== "?camera=1";
 }

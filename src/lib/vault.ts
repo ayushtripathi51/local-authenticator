@@ -17,6 +17,7 @@ import {
 import {
   authenticateBiometricUnlock,
   getBiometricEnrollment,
+  hasDurableBiometricUnlock,
   isBiometricUnlockAvailable
 } from "./biometric";
 
@@ -82,7 +83,7 @@ export async function getBiometricVaultStatus(): Promise<
     getBiometricEnrollment(),
     hasValidUnlockSession()
   ]);
-  if (!enrollment || !hasSession) {
+  if (!enrollment || (!hasSession && !hasDurableBiometricUnlock(enrollment))) {
     return { state: "not-enrolled" };
   }
   return {
@@ -127,7 +128,10 @@ export async function unlockVault(password: string): Promise<UnlockedVault> {
 }
 
 export async function unlockVaultWithBiometric(): Promise<UnlockedVault> {
-  await authenticateBiometricUnlock();
+  const authentication = await authenticateBiometricUnlock();
+  if (authentication.exportedKeyString) {
+    await saveSession(authentication.exportedKeyString);
+  }
   return unlockFromSession();
 }
 
@@ -185,6 +189,19 @@ export async function addVaultAccount(
   });
 }
 
+export async function addVaultAccounts(
+  unlocked: UnlockedVault,
+  inputs: TotpAccountInput[]
+): Promise<UnlockedVault> {
+  if (inputs.length === 0) {
+    return unlocked;
+  }
+  return saveUnlockedVault({
+    ...unlocked,
+    accounts: [...inputs.map((input) => createAccount(input)), ...unlocked.accounts]
+  });
+}
+
 export async function updateVaultAccount(
   unlocked: UnlockedVault,
   id: string,
@@ -207,6 +224,9 @@ export async function deleteVaultAccount(
 }
 
 export async function lockVault(): Promise<void> {
+  if (await getBiometricEnrollment()) {
+    return;
+  }
   await getChromeStorage().session.remove(SESSION_STORAGE_KEY);
 }
 

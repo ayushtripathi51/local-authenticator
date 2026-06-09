@@ -7,12 +7,13 @@ import {
   getVaultStatus,
   lockVault,
   unlockFromSession,
+  unlockVaultWithBiometric,
   unlockVault,
   VAULT_STORAGE_KEY,
   LEGACY_ACCOUNTS_KEY,
   SESSION_STORAGE_KEY
 } from "./vault";
-import { BIOMETRIC_STORAGE_KEY } from "./biometric";
+import { BIOMETRIC_STORAGE_KEY, enableBiometricUnlock } from "./biometric";
 
 const localStorageArea = new Map<string, unknown>();
 const sessionStorageArea = new Map<string, unknown>();
@@ -41,6 +42,38 @@ beforeEach(() => {
     storage: {
       local: makeStorageArea(localStorageArea),
       session: makeStorageArea(sessionStorageArea)
+    }
+  });
+  vi.stubGlobal("PublicKeyCredential", {
+    isUserVerifyingPlatformAuthenticatorAvailable: vi.fn(async () => true)
+  });
+  Object.defineProperty(navigator, "credentials", {
+    configurable: true,
+    value: {
+      create: vi.fn(async () => ({
+        id: "credential-id",
+        rawId: new Uint8Array([1, 2, 3, 4]).buffer,
+        type: "public-key",
+        getClientExtensionResults: () => ({
+          prf: {
+            results: {
+              first: new Uint8Array([5, 6, 7, 8]).buffer
+            }
+          }
+        })
+      })),
+      get: vi.fn(async () => ({
+        id: "credential-id",
+        rawId: new Uint8Array([1, 2, 3, 4]).buffer,
+        type: "public-key",
+        getClientExtensionResults: () => ({
+          prf: {
+            results: {
+              first: new Uint8Array([5, 6, 7, 8]).buffer
+            }
+          }
+        })
+      }))
     }
   });
 });
@@ -97,7 +130,44 @@ describe("encrypted vault", () => {
 
     await expect(getBiometricVaultStatus()).resolves.toEqual({
       state: "biometric-locked",
-      biometricAvailable: false
+      biometricAvailable: true
+    });
+  });
+
+  test("keeps biometric unlock available after locking an enrolled vault", async () => {
+    vi.setSystemTime(new Date("2026-06-08T00:00:00.000Z"));
+    await createVault("password", []);
+    localStorageArea.set(BIOMETRIC_STORAGE_KEY, {
+      credentialId: "AQIDBA",
+      label: "Local Authenticator vault",
+      createdAt: Date.now()
+    });
+
+    await lockVault();
+
+    await expect(getVaultStatus()).resolves.toEqual({
+      state: "biometric-locked",
+      biometricAvailable: true
+    });
+  });
+
+  test("unlocks with biometrics after the session cache expires", async () => {
+    vi.setSystemTime(new Date("2026-06-08T00:00:00.000Z"));
+    const unlocked = await createVault("password", []);
+    await enableBiometricUnlock("Local Authenticator vault", unlocked.exportedKeyString);
+    await lockVault();
+
+    vi.setSystemTime(new Date("2026-06-09T00:00:01.000Z"));
+
+    await expect(getVaultStatus()).resolves.toEqual({
+      state: "biometric-locked",
+      biometricAvailable: true
+    });
+    await expect(unlockVaultWithBiometric()).resolves.toMatchObject({
+      accounts: []
+    });
+    expect(sessionStorageArea.get(SESSION_STORAGE_KEY)).toMatchObject({
+      expiresAt: expect.any(Number)
     });
   });
 

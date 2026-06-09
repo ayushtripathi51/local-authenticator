@@ -1,4 +1,5 @@
 import { Fingerprint, Lock, Plus, Search, ShieldCheck } from "lucide-react";
+import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { TotpAccount, TotpAccountInput } from "./lib/accounts";
 import { generateTotp, getCountdown } from "./lib/totp";
@@ -10,6 +11,7 @@ import {
 } from "./lib/biometric";
 import {
   addVaultAccount,
+  addVaultAccounts,
   createVault,
   deleteVaultAccount,
   getVaultStatus,
@@ -40,6 +42,10 @@ export function App() {
   const [editingAccount, setEditingAccount] = useState<TotpAccount | null>(null);
   const [copiedId, setCopiedId] = useState("");
   const [error, setError] = useState("");
+  const [biometricPasswordOpen, setBiometricPasswordOpen] = useState(false);
+  const [biometricPassword, setBiometricPassword] = useState("");
+  const [biometricPasswordSubmitting, setBiometricPasswordSubmitting] = useState(false);
+  const autoCameraScanner = new URLSearchParams(window.location.search).get("camera") === "1";
 
   const accounts = vault?.accounts ?? [];
 
@@ -104,6 +110,10 @@ export function App() {
       if (status.state === "unlocked") {
         setVault(status.vault);
         setLockMode("unlock");
+        if (autoCameraScanner) {
+          setEditingAccount(null);
+          setShowForm(true);
+        }
       } else if (status.state === "biometric-locked") {
         setVault(null);
         setBiometricAvailable(status.biometricAvailable);
@@ -133,6 +143,15 @@ export function App() {
       setEditingAccount(null);
     }
     setShowForm(false);
+  }
+
+  async function importAccounts(inputs: TotpAccountInput[]) {
+    if (!vault) {
+      return;
+    }
+    setVault(await addVaultAccounts(vault, inputs));
+    setShowForm(false);
+    setEditingAccount(null);
   }
 
   async function removeAccount(id: string) {
@@ -173,13 +192,42 @@ export function App() {
         await disableBiometricUnlock();
         setBiometricEnabled(false);
       } else {
-        await enableBiometricUnlock("Local Authenticator vault");
-        setBiometricEnabled(true);
+        setBiometricPassword("");
+        setBiometricPasswordOpen(true);
       }
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update biometric unlock");
     }
+  }
+
+  async function confirmBiometricUnlock(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!biometricPassword) {
+      return;
+    }
+    setBiometricPasswordSubmitting(true);
+    try {
+      const verifiedVault = await unlockVault(biometricPassword);
+      await enableBiometricUnlock("Local Authenticator vault", verifiedVault.exportedKeyString);
+      setVault(verifiedVault);
+      setBiometricEnabled(true);
+      setBiometricPassword("");
+      setBiometricPasswordOpen(false);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update biometric unlock");
+    } finally {
+      setBiometricPasswordSubmitting(false);
+    }
+  }
+
+  function cancelBiometricPassword() {
+    if (biometricPasswordSubmitting) {
+      return;
+    }
+    setBiometricPassword("");
+    setBiometricPasswordOpen(false);
   }
 
   async function lock() {
@@ -188,7 +236,7 @@ export function App() {
     setCodes({});
     setShowForm(false);
     setEditingAccount(null);
-    setLockMode("unlock");
+    setLockMode(biometricEnabled ? "biometric" : "unlock");
   }
 
   async function copyCode(account: TotpAccount) {
@@ -283,10 +331,51 @@ export function App() {
 
       {error ? <p className="error-banner">{error}</p> : null}
 
+      {biometricPasswordOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <form className="modal-panel" onSubmit={confirmBiometricUnlock}>
+            <div className="modal-panel__header">
+              <div>
+                <h2>Enable biometric unlock</h2>
+                <p>Enter your vault password to confirm this device.</p>
+              </div>
+            </div>
+            <label className="field">
+              <span>Vault password</span>
+              <input
+                value={biometricPassword}
+                onChange={(event) => setBiometricPassword(event.target.value)}
+                type="password"
+                autoComplete="current-password"
+                minLength={8}
+                autoFocus
+                required
+              />
+            </label>
+            <div className="modal-panel__actions">
+              <button
+                className="text-button"
+                type="button"
+                onClick={cancelBiometricPassword}
+                disabled={biometricPasswordSubmitting}
+              >
+                Cancel
+              </button>
+              <button className="primary-button" type="submit" disabled={biometricPasswordSubmitting}>
+                <Fingerprint size={18} />
+                {biometricPasswordSubmitting ? "Checking" : "Enable"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
       {showForm ? (
         <AccountForm
           editingAccount={editingAccount}
+          autoStartCamera={autoCameraScanner}
           onSave={saveAccount}
+          onImportMany={importAccounts}
           onCancel={() => {
             setShowForm(false);
             setEditingAccount(null);

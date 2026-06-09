@@ -5,7 +5,7 @@ A standalone Chrome extension for generating private 2FA codes from an encrypted
 ## Features
 
 - Google Authenticator-style popup UI.
-- Add TOTP accounts manually or from `otpauth://` URLs.
+- Add TOTP accounts manually, from `otpauth://` URLs, or from Google Authenticator export QR images/camera scans.
 - Live six-digit codes with countdown.
 - Copy code button.
 - Search, edit, and delete accounts.
@@ -22,8 +22,8 @@ A standalone Chrome extension for generating private 2FA codes from an encrypted
 - Secrets are encrypted at rest with `@metamask/browser-passworder`, using the same class of PBKDF2 + AES-GCM browser vault design used by MetaMask tooling.
 - The password is not stored.
 - Decrypted secrets live in popup memory only while unlocked.
-- The 24-hour convenience unlock stores exported vault key material in `chrome.storage.session`, not the raw password. It is cleared by manual lock, expiry, browser restart, extension reload, update, or disable.
-- Biometric/passkey unlock uses WebAuthn with a platform authenticator and no explicit RP ID, which is the supported pattern for extension origins. It gates use of the cached 24-hour unlock key; after the session expires or manual lock clears it, the password is required again.
+- The 24-hour convenience unlock stores exported vault key material in `chrome.storage.session`, not the raw password. Without biometric unlock it is cleared by manual lock, expiry, browser restart, extension reload, update, or disable.
+- Biometric/passkey unlock uses WebAuthn with a platform authenticator and no explicit RP ID, which is the supported pattern for extension origins. When enabled, manual lock keeps the vault closed in the UI but requires successful device verification before the cached session key can be reused. New enrollments also wrap the vault session key with WebAuthn PRF material so biometric unlock can restore the session after expiry on devices that support PRF.
 - Clipboard copy writes only the current TOTP code, not the secret.
 
 ## Install From Source

@@ -1,17 +1,37 @@
+import { decrypt, encrypt } from "@metamask/browser-passworder";
+
 export const BIOMETRIC_STORAGE_KEY = "totp.biometricUnlock";
 
 export type BiometricEnrollment = {
   credentialId: string;
   label: string;
   createdAt: number;
+  prfSalt?: string;
+  wrappedKey?: string;
 };
 
 export type BiometricAuthentication = {
   credentialId: string;
+  exportedKeyString?: string;
   verifiedAt: number;
 };
 
 const RP_NAME = "Local Authenticator";
+const PRF_SALT_LENGTH = 32;
+
+type PrfCredential = PublicKeyCredential & {
+  getClientExtensionResults?: () => {
+    prf?: {
+      results?: {
+        first?: ArrayBuffer;
+      };
+    };
+  };
+};
+
+type WrappedKeyPayload = {
+  exportedKeyString: string;
+};
 
 export async function isBiometricUnlockAvailable(): Promise<boolean> {
   const credentialApi = globalThis.PublicKeyCredential;
@@ -38,12 +58,16 @@ export async function getBiometricEnrollment(): Promise<BiometricEnrollment | nu
   return enrollment;
 }
 
-export async function enableBiometricUnlock(label: string): Promise<BiometricEnrollment> {
+export async function enableBiometricUnlock(
+  label: string,
+  exportedKeyString: string
+): Promise<BiometricEnrollment> {
   if (!(await isBiometricUnlockAvailable())) {
     throw new Error("Biometric unlock is not available on this device");
   }
 
   const userId = randomBuffer(32);
+  const prfSalt = randomBuffer(PRF_SALT_LENGTH);
   const credential = await navigator.credentials.create({
     publicKey: {
       challenge: randomBuffer(32),
@@ -63,18 +87,30 @@ export async function enableBiometricUnlock(label: string): Promise<BiometricEnr
         userVerification: "required"
       },
       timeout: 60_000,
-      attestation: "none"
-    }
+      attestation: "none",
+      extensions: {
+        prf: {
+          eval: {
+            first: prfSalt
+          }
+        }
+      }
+    } as PublicKeyCredentialCreationOptions
   });
 
   if (!isPublicKeyCredential(credential)) {
     throw new Error("Biometric enrollment failed");
   }
 
+  const prfKey = getPrfKey(credential);
+  const prfKeyString = arrayBufferToBase64Url(prfKey);
+  const wrappedKey = await encrypt(prfKeyString, { exportedKeyString } satisfies WrappedKeyPayload);
   const enrollment: BiometricEnrollment = {
     credentialId: arrayBufferToBase64Url(credential.rawId),
     label,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    prfSalt: arrayBufferToBase64Url(prfSalt),
+    wrappedKey
   };
   await getChromeStorage().local.set({ [BIOMETRIC_STORAGE_KEY]: enrollment });
   return enrollment;
@@ -98,9 +134,18 @@ export async function authenticateBiometricUnlock(): Promise<BiometricAuthentica
           type: "public-key"
         }
       ],
+      extensions: enrollment.prfSalt
+        ? {
+            prf: {
+              eval: {
+                first: base64UrlToArrayBuffer(enrollment.prfSalt)
+              }
+            }
+          }
+        : undefined,
       userVerification: "required",
       timeout: 60_000
-    }
+    } as PublicKeyCredentialRequestOptions
   });
 
   if (!isPublicKeyCredential(credential)) {
@@ -112,14 +157,24 @@ export async function authenticateBiometricUnlock(): Promise<BiometricAuthentica
     throw new Error("Biometric credential mismatch");
   }
 
+  const exportedKeyString =
+    enrollment.prfSalt && enrollment.wrappedKey
+      ? await unwrapExportedKey(credential, enrollment.wrappedKey)
+      : undefined;
+
   return {
     credentialId,
+    exportedKeyString,
     verifiedAt: Date.now()
   };
 }
 
 export async function disableBiometricUnlock(): Promise<void> {
   await getChromeStorage().local.remove(BIOMETRIC_STORAGE_KEY);
+}
+
+export function hasDurableBiometricUnlock(enrollment: BiometricEnrollment | null): boolean {
+  return !!enrollment?.prfSalt && !!enrollment.wrappedKey;
 }
 
 function randomBytes(length: number): Uint8Array {
@@ -163,7 +218,11 @@ function isBiometricEnrollment(value: unknown): value is BiometricEnrollment {
     typeof value === "object" &&
     typeof (value as BiometricEnrollment).credentialId === "string" &&
     typeof (value as BiometricEnrollment).label === "string" &&
-    typeof (value as BiometricEnrollment).createdAt === "number"
+    typeof (value as BiometricEnrollment).createdAt === "number" &&
+    ((value as BiometricEnrollment).prfSalt === undefined ||
+      typeof (value as BiometricEnrollment).prfSalt === "string") &&
+    ((value as BiometricEnrollment).wrappedKey === undefined ||
+      typeof (value as BiometricEnrollment).wrappedKey === "string")
   );
 }
 
@@ -181,4 +240,24 @@ function getChromeStorage(): Pick<typeof chrome.storage, "local"> {
     throw new Error("Chrome storage is required");
   }
   return chrome.storage;
+}
+
+function getPrfKey(credential: PublicKeyCredential): ArrayBuffer {
+  const prfKey = (credential as PrfCredential).getClientExtensionResults?.().prf?.results?.first;
+  if (!(prfKey instanceof ArrayBuffer)) {
+    throw new Error("Biometric key wrapping is not available on this device");
+  }
+  return prfKey;
+}
+
+async function unwrapExportedKey(
+  credential: PublicKeyCredential,
+  wrappedKey: string
+): Promise<string> {
+  const prfKeyString = arrayBufferToBase64Url(getPrfKey(credential));
+  const payload = (await decrypt(prfKeyString, wrappedKey)) as Partial<WrappedKeyPayload>;
+  if (typeof payload.exportedKeyString !== "string") {
+    throw new Error("Biometric unlock data is invalid");
+  }
+  return payload.exportedKeyString;
 }

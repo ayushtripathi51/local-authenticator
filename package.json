@@ -1,6 +1,6 @@
 {
   "name": "local-authenticator",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
   "dependencies": {
     "@metamask/browser-passworder": "^6.0.0",
     "buffer": "^6.0.3",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
