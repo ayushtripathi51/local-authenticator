@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Local Authenticator: Private TOTP Vault",
   "description": "Generate private 2FA codes from an encrypted local TOTP vault.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "permissions": ["storage"],
   "action": {
     "default_title": "Local Authenticator",
