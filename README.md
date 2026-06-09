@@ -64,11 +64,11 @@ Create a zipped extension package:
 npm run package:extension
 ```
 
-This creates `totp-extension.zip` from the generated `dist/` folder.
+This creates `local-authenticator-private-totp-vault.zip` from the generated `dist/` folder.
 
 ## GitHub Releases
 
-Compiled `dist/` output is intentionally not committed. Tagged releases build the extension and upload `totp-extension.zip` as a release artifact.
+Compiled `dist/` output is intentionally not committed. Tagged releases build the extension and upload `local-authenticator-private-totp-vault.zip` as a release artifact.
 
 Create a release by pushing a version tag:
 

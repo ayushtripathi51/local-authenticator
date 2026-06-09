@@ -1,6 +1,6 @@
 node_modules/
 dist/
-totp-extension.zip
+local-authenticator-private-totp-vault.zip
 test-results/
 playwright-report/
 coverage/

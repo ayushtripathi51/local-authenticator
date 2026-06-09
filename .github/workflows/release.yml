@@ -43,5 +43,5 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: totp-extension.zip
+          files: local-authenticator-private-totp-vault.zip
           fail_on_unmatched_files: true
