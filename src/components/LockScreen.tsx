@@ -1,18 +1,28 @@
-import { KeyRound, Lock, ShieldCheck } from "lucide-react";
+import { Fingerprint, KeyRound, Lock, ShieldCheck } from "lucide-react";
 import { FormEvent, useState } from "react";
 
 type LockScreenProps = {
-  mode: "create" | "migrate" | "unlock";
+  mode: "biometric" | "create" | "migrate" | "unlock";
   legacyCount?: number;
   error: string;
+  biometricAvailable?: boolean;
+  onBiometricUnlock?: () => Promise<void>;
   onSubmit: (password: string) => Promise<void>;
 };
 
-export function LockScreen({ mode, legacyCount = 0, error, onSubmit }: LockScreenProps) {
+export function LockScreen({
+  mode,
+  legacyCount = 0,
+  error,
+  biometricAvailable = false,
+  onBiometricUnlock,
+  onSubmit
+}: LockScreenProps) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [localError, setLocalError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [biometricSubmitting, setBiometricSubmitting] = useState(false);
   const isCreate = mode === "create" || mode === "migrate";
 
   async function submit(event: FormEvent) {
@@ -32,6 +42,19 @@ export function LockScreen({ mode, legacyCount = 0, error, onSubmit }: LockScree
     }
   }
 
+  async function submitBiometric() {
+    if (!onBiometricUnlock) {
+      return;
+    }
+    setLocalError("");
+    setBiometricSubmitting(true);
+    try {
+      await onBiometricUnlock();
+    } finally {
+      setBiometricSubmitting(false);
+    }
+  }
+
   return (
     <main className="lock-shell">
       <section className="lock-panel">
@@ -44,8 +67,22 @@ export function LockScreen({ mode, legacyCount = 0, error, onSubmit }: LockScree
             ? `${legacyCount} saved code${legacyCount === 1 ? "" : "s"} will be encrypted into your vault.`
             : mode === "create"
               ? "Encrypt your TOTP secrets before saving them."
+              : mode === "biometric"
+                ? "Use your device authenticator or enter your password."
               : "Enter your password to decrypt local TOTP secrets."}
         </p>
+
+        {mode === "biometric" ? (
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!biometricAvailable || biometricSubmitting}
+            onClick={submitBiometric}
+          >
+            <Fingerprint size={18} />
+            {biometricSubmitting ? "Checking" : "Unlock with biometrics"}
+          </button>
+        ) : null}
 
         <form className="lock-form" onSubmit={submit}>
           <label className="field">

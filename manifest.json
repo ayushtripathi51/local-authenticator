@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Standalone Authenticator",
   "description": "Generate TOTP codes locally from a standalone popup.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "permissions": ["storage"],
   "action": {
     "default_title": "Authenticator",

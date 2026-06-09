@@ -1,13 +1,20 @@
-import { Lock, Plus, Search, ShieldCheck } from "lucide-react";
+import { Fingerprint, Lock, Plus, Search, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { TotpAccount, TotpAccountInput } from "./lib/accounts";
 import { generateTotp, getCountdown } from "./lib/totp";
+import {
+  disableBiometricUnlock,
+  enableBiometricUnlock,
+  getBiometricEnrollment,
+  isBiometricUnlockAvailable
+} from "./lib/biometric";
 import {
   addVaultAccount,
   createVault,
   deleteVaultAccount,
   getVaultStatus,
   lockVault,
+  unlockVaultWithBiometric,
   unlockVault,
   updateVaultAccount,
   type UnlockedVault
@@ -20,8 +27,12 @@ type CodeMap = Record<string, string>;
 
 export function App() {
   const [vault, setVault] = useState<UnlockedVault | null>(null);
-  const [lockMode, setLockMode] = useState<"loading" | "create" | "migrate" | "unlock">("loading");
+  const [lockMode, setLockMode] = useState<"biometric" | "loading" | "create" | "migrate" | "unlock">(
+    "loading"
+  );
   const [legacyCount, setLegacyCount] = useState(0);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [codes, setCodes] = useState<CodeMap>({});
   const [now, setNow] = useState(Date.now());
   const [query, setQuery] = useState("");
@@ -83,10 +94,20 @@ export function App() {
 
   async function refreshVaultStatus() {
     try {
-      const status = await getVaultStatus();
+      const [status, enrollment, available] = await Promise.all([
+        getVaultStatus(),
+        getBiometricEnrollment(),
+        isBiometricUnlockAvailable()
+      ]);
+      setBiometricEnabled(!!enrollment);
+      setBiometricAvailable(available);
       if (status.state === "unlocked") {
         setVault(status.vault);
         setLockMode("unlock");
+      } else if (status.state === "biometric-locked") {
+        setVault(null);
+        setBiometricAvailable(status.biometricAvailable);
+        setLockMode("biometric");
       } else if (status.state === "needs-password-migration") {
         setLockMode("migrate");
         setLegacyCount(status.legacyCount);
@@ -124,12 +145,40 @@ export function App() {
   async function submitPassword(password: string) {
     try {
       const nextVault =
-        lockMode === "unlock" ? await unlockVault(password) : await createVault(password);
+        lockMode === "unlock" || lockMode === "biometric"
+          ? await unlockVault(password)
+          : await createVault(password);
       setVault(nextVault);
       setLockMode("unlock");
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not unlock vault");
+    }
+  }
+
+  async function submitBiometricUnlock() {
+    try {
+      const nextVault = await unlockVaultWithBiometric();
+      setVault(nextVault);
+      setLockMode("unlock");
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not unlock with biometrics");
+    }
+  }
+
+  async function toggleBiometricUnlock() {
+    try {
+      if (biometricEnabled) {
+        await disableBiometricUnlock();
+        setBiometricEnabled(false);
+      } else {
+        await enableBiometricUnlock("Authenticator vault");
+        setBiometricEnabled(true);
+      }
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update biometric unlock");
     }
   }
 
@@ -181,9 +230,19 @@ export function App() {
   if (!vault) {
     return (
       <LockScreen
-        mode={lockMode === "migrate" ? "migrate" : lockMode === "create" ? "create" : "unlock"}
+        mode={
+          lockMode === "migrate"
+            ? "migrate"
+            : lockMode === "create"
+              ? "create"
+              : lockMode === "biometric"
+                ? "biometric"
+                : "unlock"
+        }
         legacyCount={legacyCount}
         error={error}
+        biometricAvailable={biometricAvailable}
+        onBiometricUnlock={submitBiometricUnlock}
         onSubmit={submitPassword}
       />
     );
@@ -202,6 +261,17 @@ export function App() {
           </div>
         </div>
         <div className="app-actions">
+          <button
+            className="biometric-button"
+            type="button"
+            disabled={!biometricAvailable && !biometricEnabled}
+            onClick={toggleBiometricUnlock}
+            aria-label={biometricEnabled ? "Disable biometric unlock" : "Enable biometric unlock"}
+            title={biometricEnabled ? "Disable biometric unlock" : "Enable biometric unlock"}
+          >
+            <Fingerprint size={18} />
+            <span>{biometricEnabled ? "On" : biometricAvailable ? "Bio" : "N/A"}</span>
+          </button>
           <button className="lock-button" type="button" onClick={lock} aria-label="Lock vault">
             <Lock size={20} />
           </button>

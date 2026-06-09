@@ -14,6 +14,11 @@ import {
   type TotpAccount,
   type TotpAccountInput
 } from "./accounts";
+import {
+  authenticateBiometricUnlock,
+  getBiometricEnrollment,
+  isBiometricUnlockAvailable
+} from "./biometric";
 
 export const VAULT_STORAGE_KEY = "totp.encryptedVault";
 export const LEGACY_ACCOUNTS_KEY = "totp.accounts";
@@ -33,6 +38,7 @@ export type UnlockedVault = {
 export type VaultStatus =
   | { state: "new" }
   | { state: "locked" }
+  | { state: "biometric-locked"; biometricAvailable: boolean }
   | { state: "unlocked"; vault: UnlockedVault }
   | { state: "needs-password-migration"; legacyCount: number };
 
@@ -46,6 +52,11 @@ export async function getVaultStatus(): Promise<VaultStatus> {
   const result = await storage.local.get([VAULT_STORAGE_KEY, LEGACY_ACCOUNTS_KEY]);
 
   if (typeof result[VAULT_STORAGE_KEY] === "string") {
+    const biometricStatus = await getBiometricVaultStatus();
+    if (biometricStatus.state === "biometric-locked") {
+      return biometricStatus;
+    }
+
     try {
       return { state: "unlocked", vault: await unlockFromSession() };
     } catch {
@@ -62,6 +73,22 @@ export async function getVaultStatus(): Promise<VaultStatus> {
   }
 
   return { state: "new" };
+}
+
+export async function getBiometricVaultStatus(): Promise<
+  { state: "biometric-locked"; biometricAvailable: boolean } | { state: "not-enrolled" }
+> {
+  const [enrollment, hasSession] = await Promise.all([
+    getBiometricEnrollment(),
+    hasValidUnlockSession()
+  ]);
+  if (!enrollment || !hasSession) {
+    return { state: "not-enrolled" };
+  }
+  return {
+    state: "biometric-locked",
+    biometricAvailable: await isBiometricUnlockAvailable()
+  };
 }
 
 export async function createVault(
@@ -99,6 +126,11 @@ export async function unlockVault(password: string): Promise<UnlockedVault> {
   };
 }
 
+export async function unlockVaultWithBiometric(): Promise<UnlockedVault> {
+  await authenticateBiometricUnlock();
+  return unlockFromSession();
+}
+
 export async function unlockFromSession(now = Date.now()): Promise<UnlockedVault> {
   const storage = getChromeStorage();
   const result = await storage.session.get(SESSION_STORAGE_KEY);
@@ -117,6 +149,13 @@ export async function unlockFromSession(now = Date.now()): Promise<UnlockedVault
     accounts: payload.accounts,
     exportedKeyString: session.exportedKeyString
   };
+}
+
+async function hasValidUnlockSession(now = Date.now()): Promise<boolean> {
+  const storage = getChromeStorage();
+  const result = await storage.session.get(SESSION_STORAGE_KEY);
+  const session = result[SESSION_STORAGE_KEY] as UnlockSession | undefined;
+  return !!session?.exportedKeyString && session.expiresAt > now;
 }
 
 export async function saveUnlockedVault(unlocked: UnlockedVault): Promise<UnlockedVault> {
