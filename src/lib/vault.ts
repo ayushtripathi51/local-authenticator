@@ -14,6 +14,7 @@ import {
   type TotpAccount,
   type TotpAccountInput
 } from "./accounts";
+import { exactHttpsOrigin } from "./site-fill";
 import {
   authenticateBiometricUnlock,
   getBiometricEnrollment,
@@ -103,14 +104,71 @@ export async function createVault(
   const accounts = normalizeAccounts(initialAccounts ?? legacyAccounts);
   const encrypted = await encryptWithDetail(password, { accounts });
 
-  await storage.local.set({ [VAULT_STORAGE_KEY]: encrypted.vault });
-  await storage.local.remove(LEGACY_ACCOUNTS_KEY);
-  await saveSession(encrypted.exportedKeyString);
+  await withVaultCreationLock(async () => {
+    const existing = await storage.local.get(VAULT_STORAGE_KEY);
+    if (existing[VAULT_STORAGE_KEY] !== undefined) throw new Error("A vault already exists");
+    await storage.local.set({ [VAULT_STORAGE_KEY]: encrypted.vault });
+    await storage.local.remove(LEGACY_ACCOUNTS_KEY);
+    await saveSession(encrypted.exportedKeyString);
+  });
 
   return {
     accounts,
     exportedKeyString: encrypted.exportedKeyString
   };
+}
+
+export const MAX_BACKUP_BYTES = 2 * 1024 * 1024;
+
+export async function exportVaultBackup(): Promise<string> {
+  const backup = JSON.stringify({ version: 1, format: "local-authenticator", ciphertext: await readEncryptedVault() });
+  if (backup.length > MAX_BACKUP_BYTES) throw new Error("Backup is too large");
+  return backup;
+}
+
+export async function restoreVaultBackup(backup: string, password: string): Promise<{ accounts: TotpAccount[] }> {
+  assertPassword(password);
+  const storage = getChromeStorage();
+  async function requireEmpty() {
+    const existing = await storage.local.get([VAULT_STORAGE_KEY, LEGACY_ACCOUNTS_KEY]);
+    if (existing[VAULT_STORAGE_KEY] !== undefined || existing[LEGACY_ACCOUNTS_KEY] !== undefined) {
+      throw new Error("A vault already exists; restore into a fresh installation");
+    }
+  }
+  await requireEmpty();
+  if (backup.length > MAX_BACKUP_BYTES) throw new Error("Backup is too large");
+  const envelope = JSON.parse(backup);
+  if (envelope?.version !== 1 || envelope.format !== "local-authenticator" || typeof envelope.ciphertext !== "string") {
+    throw new Error("Invalid vault backup");
+  }
+  const inner = JSON.parse(envelope.ciphertext);
+  const metadata = inner?.keyMetadata;
+  if (!inner || ![inner.salt, inner.iv, inner.data].every(value => typeof value === "string" && /^[A-Za-z0-9+/]+={0,2}$/.test(value)) ||
+      (metadata !== undefined && (metadata?.algorithm !== "PBKDF2" ||
+        ![10000, 900000].includes(metadata?.params?.iterations)))) {
+    throw new Error("Unsupported vault encryption");
+  }
+  const { accounts } = parseVaultPayload(await decrypt(password, envelope.ciphertext));
+  if (accounts.some(account => !account || typeof account.id !== "string" || !account.id ||
+      typeof account.issuer !== "string" || typeof account.label !== "string" || !account.label.trim() ||
+      typeof account.secret !== "string" || !/^[A-Z2-7]{2,}$/.test(account.secret) ||
+      ![6, 7, 8].includes(account.digits) || !["SHA1", "SHA256", "SHA512"].includes(account.algorithm) ||
+      !Number.isSafeInteger(account.period) || account.period <= 0 ||
+      (account.siteOrigin !== undefined && (!account.siteOrigin || exactHttpsOrigin(account.siteOrigin) !== account.siteOrigin)) ||
+      !Number.isFinite(account.createdAt) || !Number.isFinite(account.updatedAt)) ||
+      new Set(accounts.map(account => account.id)).size !== accounts.length) {
+    throw new Error("Invalid backup accounts");
+  }
+  // Serialize same-origin restores and vault creation in Chrome.
+  await withVaultCreationLock(async () => {
+    await requireEmpty();
+    await storage.local.set({ [VAULT_STORAGE_KEY]: envelope.ciphertext });
+  });
+  return { accounts };
+}
+
+async function withVaultCreationLock<T>(action: () => Promise<T>): Promise<T> {
+  return navigator.locks.request("totp.vault-creation", action);
 }
 
 export async function unlockVault(password: string): Promise<UnlockedVault> {

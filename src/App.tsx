@@ -2,6 +2,7 @@ import { Fingerprint, Lock, Plus, Search, ShieldCheck } from "lucide-react";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { TotpAccount, TotpAccountInput } from "./lib/accounts";
+import { currentDocument, currentSite, fillDocument, fillSiteCode } from "./lib/site-fill";
 import { generateTotp, getCountdown } from "./lib/totp";
 import {
   disableBiometricUnlock,
@@ -15,6 +16,8 @@ import {
   createVault,
   deleteVaultAccount,
   getVaultStatus,
+  exportVaultBackup,
+  restoreVaultBackup,
   lockVault,
   unlockVaultWithBiometric,
   unlockVault,
@@ -37,6 +40,9 @@ export function App() {
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [codes, setCodes] = useState<CodeMap>({});
   const [now, setNow] = useState(Date.now());
+  const [siteOrigin, setSiteOrigin] = useState("");
+  const [siteBusy, setSiteBusy] = useState(false);
+  const [siteStatus, setSiteStatus] = useState("");
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingAccount, setEditingAccount] = useState<TotpAccount | null>(null);
@@ -51,6 +57,9 @@ export function App() {
 
   useEffect(() => {
     refreshVaultStatus();
+    if (globalThis.chrome?.tabs) {
+      currentSite().then(target => setSiteOrigin(target?.origin ?? "")).catch(() => setSiteOrigin(""));
+    }
   }, []);
 
   useEffect(() => {
@@ -175,6 +184,75 @@ export function App() {
     }
   }
 
+  async function restoreBackup(text: string, password: string) {
+    if (lockMode !== "create") throw new Error("Restore requires a fresh installation");
+    await restoreVaultBackup(text, password);
+    await refreshVaultStatus();
+  }
+
+  async function changeSite(account: TotpAccount, origin?: string) {
+    if (!vault) return;
+    setSiteBusy(true);
+    setError("");
+    setSiteStatus("");
+    try {
+      if (origin && (await currentSite())?.origin !== origin) throw new Error("The site changed");
+      setVault(await updateVaultAccount(vault, account.id, { siteOrigin: origin }));
+    } catch {
+      setError("Could not change site pairing");
+    } finally {
+      setSiteBusy(false);
+    }
+  }
+
+  async function fillCode(account: TotpAccount) {
+    if (!account.siteOrigin || !biometricEnabled || siteBusy) return;
+    setSiteBusy(true);
+    setError("");
+    setSiteStatus("");
+    try {
+      let verified: UnlockedVault | undefined;
+      const filled = await fillSiteCode(account.siteOrigin, {
+        active: currentDocument,
+        approve: async () => {
+          verified = await unlockVaultWithBiometric();
+          return true;
+        },
+        code: async () => {
+          const latest = verified?.accounts.find(item => item.id === account.id && item.siteOrigin === account.siteOrigin);
+          if (!latest) throw new Error("Site pairing changed");
+          const time = Date.now();
+          if (getCountdown(time, latest.period).secondsRemaining <= 3) throw new Error("Code is expiring");
+          return generateTotp({ ...latest, timestamp: time / 1000 });
+        },
+        fill: fillDocument
+      });
+      if (!filled) throw new Error("No supported OTP field");
+      setSiteStatus("Code filled. Review the form before submitting.");
+    } catch {
+      setError("No code filled. Verify again on the paired site with one empty one-time-code field and a fresh code.");
+    } finally {
+      setSiteBusy(false);
+    }
+  }
+
+  async function downloadBackup() {
+    try {
+      const backup = await exportVaultBackup();
+      const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
+      try {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "local-authenticator-backup.json";
+        link.click();
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } catch {
+      setError("Could not download the encrypted backup");
+    }
+  }
+
   async function submitBiometricUnlock() {
     try {
       const nextVault = await unlockVaultWithBiometric();
@@ -292,6 +370,7 @@ export function App() {
         biometricAvailable={biometricAvailable}
         onBiometricUnlock={submitBiometricUnlock}
         onSubmit={submitPassword}
+        onRestore={lockMode === "create" ? restoreBackup : undefined}
       />
     );
   }
@@ -329,7 +408,8 @@ export function App() {
         </div>
       </header>
 
-      {error ? <p className="error-banner">{error}</p> : null}
+      {error ? <p className="error-banner" role="alert">{error}</p> : null}
+      {siteStatus ? <p role="status">{siteStatus}</p> : null}
 
       {biometricPasswordOpen ? (
         <div className="modal-backdrop" role="presentation">
@@ -406,8 +486,8 @@ export function App() {
       ) : (
         <section className="account-list" aria-label="TOTP accounts">
           {visibleAccounts.map((account) => (
+            <div key={account.id}>
             <AccountCard
-              key={account.id}
               account={account}
               code={codes[account.id] ?? "------"}
               seconds={getCountdown(now, account.period).secondsRemaining}
@@ -417,6 +497,23 @@ export function App() {
               onEdit={() => startEdit(account)}
               onDelete={() => removeAccount(account.id)}
             />
+            {account.siteOrigin ? (
+              <div>
+                {siteOrigin === account.siteOrigin && biometricEnabled ? (
+                  <button type="button" className="text-button" disabled={siteBusy} onClick={() => fillCode(account)}>
+                    Verify device and fill on {account.siteOrigin}
+                  </button>
+                ) : null}
+                <button type="button" className="text-button" disabled={siteBusy} onClick={() => changeSite(account)}>
+                  Unpair {account.siteOrigin}
+                </button>
+              </div>
+            ) : siteOrigin && biometricEnabled ? (
+              <button type="button" className="text-button" disabled={siteBusy} onClick={() => changeSite(account, siteOrigin)}>
+                Pair with {siteOrigin}
+              </button>
+            ) : null}
+            </div>
           ))}
           {visibleAccounts.length === 0 ? (
             <p className="no-results">No matching accounts.</p>
@@ -426,6 +523,7 @@ export function App() {
 
       <footer className="app-footer">
         <span>{accounts.length} saved</span>
+        <button className="text-button" type="button" onClick={downloadBackup}>Download encrypted backup</button>
         <span>{countdown.secondsRemaining}s</span>
       </footer>
     </main>

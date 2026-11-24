@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Effective date:** June 10, 2026
+**Effective date:** November 24, 2026
 
 Local Authenticator: Private TOTP Vault ("Local Authenticator") is a browser
 extension that stores time-based one-time password (TOTP) accounts in an
@@ -54,15 +54,29 @@ system and browser.
 Local Authenticator does not send TOTP secrets, generated codes, passwords,
 QR data, or vault contents to external servers.
 
-The extension does not request host permissions, inject content scripts into
-websites, or provide an externally connectable website messaging interface.
+The extension does not request host permissions, register content scripts, or
+provide an externally connectable website messaging interface.
+
+When you click the toolbar button, Chrome grants the extension temporary access
+to the current tab (`activeTab`). The extension reads that tab's origin to offer
+site pairing. If you pair an account with that exact origin and choose to fill a
+code, after fresh device verification it runs one function in that page which
+places the current six-to-eight digit code into a single one-time-code field.
+The extension checks the field locally and does not submit the form. The paired page can read the inserted code.
 
 ## Permissions
 
-The extension requests the following Chrome permission:
+The extension requests the following Chrome permissions:
 
 - `storage`: Used to save the encrypted vault, local settings, biometric
   enrollment metadata, and temporary unlock-session data on the user's device.
+- `activeTab`: Temporary access to the current tab, granted only when you click
+  the toolbar button, used to read its origin for site pairing.
+- `scripting`: Used, together with `activeTab`, to place a code into the paired
+  page's one-time-code field after you verify with your device.
+
+Encrypted backups you download are saved where you choose. They contain the
+vault ciphertext only and can be decrypted only with your vault password.
 
 Camera access is requested by the browser only when the user starts the camera
 scanner.

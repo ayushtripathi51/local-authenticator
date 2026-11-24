@@ -1,65 +1,8 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 test("renders popup and creates a TOTP account from an otpauth URI", async ({ page }) => {
-  await page.addInitScript(() => {
-    const local = new Map<string, unknown>();
-    const session = new Map<string, unknown>();
-    const makeArea = (area: Map<string, unknown>) => ({
-      get: async (key: string | string[]) => {
-        const keys = Array.isArray(key) ? key : [key];
-        return Object.fromEntries(keys.map((storageKey) => [storageKey, area.get(storageKey)]));
-      },
-      set: async (items: Record<string, unknown>) => {
-        Object.entries(items).forEach(([key, value]) => area.set(key, value));
-      },
-      remove: async (key: string | string[]) => {
-        const keys = Array.isArray(key) ? key : [key];
-        keys.forEach((storageKey) => area.delete(storageKey));
-      }
-    });
-    Object.defineProperty(window, "chrome", {
-      value: {
-        storage: {
-          local: makeArea(local),
-          session: makeArea(session)
-        }
-      }
-    });
-    Object.defineProperty(window, "PublicKeyCredential", {
-      configurable: true,
-      value: {
-        isUserVerifyingPlatformAuthenticatorAvailable: async () => true
-      }
-    });
-    Object.defineProperty(navigator, "credentials", {
-      configurable: true,
-      value: {
-        create: async () => ({
-          type: "public-key",
-          rawId: new Uint8Array([1, 2, 3, 4]).buffer,
-          getClientExtensionResults: () => ({
-            prf: {
-              results: {
-                first: new Uint8Array([5, 6, 7, 8]).buffer
-              }
-            }
-          })
-        }),
-        get: async () => ({
-          type: "public-key",
-          rawId: new Uint8Array([1, 2, 3, 4]).buffer,
-          getClientExtensionResults: () => ({
-            prf: {
-              results: {
-                first: new Uint8Array([5, 6, 7, 8]).buffer
-              }
-            }
-          })
-        })
-      }
-    });
-  });
-
+  await installMocks(page);
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Create password" })).toBeVisible();
@@ -134,6 +77,104 @@ test("renders popup and creates a TOTP account from an otpauth URI", async ({ pa
   await page.getByRole("button", { name: "Unlock", exact: true }).click();
   await expect(page.getByText("alice@example.com")).toBeVisible();
 });
+
+test("downloads an encrypted backup and restores it in a fresh vault", async ({ browser }) => {
+  const source = await browser.newPage();
+  await installMocks(source);
+  await source.goto("/");
+  await source.getByLabel("Password", { exact: true }).fill("correct horse battery staple");
+  await source.getByLabel("Confirm password").fill("correct horse battery staple");
+  await source.getByRole("button", { name: "Create vault" }).click();
+  await source.getByRole("button", { name: "Add first code" }).click();
+  await source.getByPlaceholder("otpauth://totp/... or otpauth-migration://...").fill(
+    "otpauth://totp/Example:restore@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example&digits=8&period=45&algorithm=SHA256"
+  );
+  await source.getByRole("button", { name: "Import URL" }).click();
+  await source.locator("form").getByRole("button", { name: "Add code" }).click();
+  const downloadPromise = source.waitForEvent("download");
+  await source.getByRole("button", { name: "Download encrypted backup" }).click();
+  const download = await downloadPromise;
+  const backup = await download.path();
+  expect(readFileSync(backup!, "utf8")).not.toContain("JBSWY3DPEHPK3PXP");
+
+  const fresh = await browser.newPage();
+  await installMocks(fresh);
+  await fresh.goto("/");
+  await fresh.getByRole("button", { name: "Restore encrypted backup" }).click();
+  await fresh.getByLabel("Encrypted backup file").setInputFiles(backup!);
+  await fresh.getByLabel("Password", { exact: true }).fill("wrong password value");
+  await fresh.getByRole("button", { name: "Restore backup" }).click();
+  await expect(fresh.getByRole("alert")).toContainText("Could not restore");
+  await fresh.getByLabel("Password", { exact: true }).fill("correct horse battery staple");
+  await fresh.getByRole("button", { name: "Restore backup" }).click();
+  await expect(fresh.getByRole("heading", { name: "Unlock vault" })).toBeVisible();
+  await fresh.getByLabel("Password", { exact: true }).fill("correct horse battery staple");
+  await fresh.getByRole("button", { name: "Unlock", exact: true }).click();
+  await expect(fresh.getByText("restore@example.com")).toBeVisible();
+  await expect(fresh.locator(".account-card__code")).toHaveText(/^\d{3} \d{5}$/);
+});
+
+async function installMocks(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    const local = new Map<string, unknown>();
+    const session = new Map<string, unknown>();
+    const makeArea = (area: Map<string, unknown>) => ({
+      get: async (key: string | string[]) => {
+        const keys = Array.isArray(key) ? key : [key];
+        return Object.fromEntries(keys.map((storageKey) => [storageKey, area.get(storageKey)]));
+      },
+      set: async (items: Record<string, unknown>) => {
+        Object.entries(items).forEach(([key, value]) => area.set(key, value));
+      },
+      remove: async (key: string | string[]) => {
+        const keys = Array.isArray(key) ? key : [key];
+        keys.forEach((storageKey) => area.delete(storageKey));
+      }
+    });
+    Object.defineProperty(window, "chrome", {
+      value: {
+        storage: {
+          local: makeArea(local),
+          session: makeArea(session)
+        }
+      }
+    });
+    Object.defineProperty(window, "PublicKeyCredential", {
+      configurable: true,
+      value: {
+        isUserVerifyingPlatformAuthenticatorAvailable: async () => true
+      }
+    });
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: {
+        create: async () => ({
+          type: "public-key",
+          rawId: new Uint8Array([1, 2, 3, 4]).buffer,
+          getClientExtensionResults: () => ({
+            prf: {
+              results: {
+                first: new Uint8Array([5, 6, 7, 8]).buffer
+              }
+            }
+          })
+        }),
+        get: async () => ({
+          type: "public-key",
+          rawId: new Uint8Array([1, 2, 3, 4]).buffer,
+          getClientExtensionResults: () => ({
+            prf: {
+              results: {
+                first: new Uint8Array([5, 6, 7, 8]).buffer
+              }
+            }
+          })
+        })
+      }
+    });
+  });
+
+}
 
 function migrationUri(otpParameters: Uint8Array[]) {
   const payload = concat([

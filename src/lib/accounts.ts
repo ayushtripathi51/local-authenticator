@@ -8,6 +8,7 @@ export type TotpAccount = {
   period: number;
   digits: number;
   algorithm: TotpAlgorithm;
+  siteOrigin?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -19,6 +20,7 @@ export type TotpAccountInput = {
   period?: number;
   digits?: number;
   algorithm?: TotpAlgorithm;
+  siteOrigin?: string;
 };
 
 export function createAccount(input: TotpAccountInput): TotpAccount {
@@ -93,6 +95,7 @@ function normalizeAccount(
     period,
     digits,
     algorithm,
+    ...(account.siteOrigin ? { siteOrigin: account.siteOrigin } : {}),
     createdAt: account.createdAt,
     updatedAt: account.updatedAt
   };

@@ -1,6 +1,8 @@
 import { Fingerprint, KeyRound, Lock, ShieldCheck } from "lucide-react";
 import { FormEvent, useState } from "react";
 
+import { MAX_BACKUP_BYTES } from "../lib/vault";
+
 type LockScreenProps = {
   mode: "biometric" | "create" | "migrate" | "unlock";
   legacyCount?: number;
@@ -8,6 +10,7 @@ type LockScreenProps = {
   biometricAvailable?: boolean;
   onBiometricUnlock?: () => Promise<void>;
   onSubmit: (password: string) => Promise<void>;
+  onRestore?: (backup: string, password: string) => Promise<void>;
 };
 
 export function LockScreen({
@@ -16,14 +19,18 @@ export function LockScreen({
   error,
   biometricAvailable = false,
   onBiometricUnlock,
-  onSubmit
+  onSubmit,
+  onRestore
 }: LockScreenProps) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [localError, setLocalError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [biometricSubmitting, setBiometricSubmitting] = useState(false);
-  const isCreate = mode === "create" || mode === "migrate";
+  const [restoreMode, setRestoreMode] = useState(false);
+  const [backupFile, setBackupFile] = useState<File | null>(null);
+  const restoring = !!onRestore && restoreMode;
+  const isCreate = !restoring && (mode === "create" || mode === "migrate");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -34,9 +41,21 @@ export function LockScreen({
     }
     setSubmitting(true);
     try {
-      await onSubmit(password);
+      if (restoring) {
+        if (!backupFile || backupFile.size > MAX_BACKUP_BYTES) {
+          setLocalError("Choose an encrypted backup smaller than 2 MB");
+          return;
+        }
+        await onRestore(await backupFile.text(), password);
+        setBackupFile(null);
+        setRestoreMode(false);
+      } else {
+        await onSubmit(password);
+      }
       setPassword("");
       setConfirmPassword("");
+    } catch {
+      setLocalError("Could not restore the backup. Check the file and its original vault password.");
     } finally {
       setSubmitting(false);
     }
@@ -61,9 +80,9 @@ export function LockScreen({
         <div className="lock-panel__icon">
           {isCreate ? <ShieldCheck size={30} /> : <Lock size={30} />}
         </div>
-        <h1>{isCreate ? "Create password" : "Unlock vault"}</h1>
+        <h1>{restoring ? "Restore encrypted backup" : isCreate ? "Create password" : "Unlock vault"}</h1>
         <p>
-          {mode === "migrate"
+          {restoring ? "Use the password from the original vault." : mode === "migrate"
             ? `${legacyCount} saved code${legacyCount === 1 ? "" : "s"} will be encrypted into your vault.`
             : mode === "create"
               ? "Encrypt your TOTP secrets before saving them."
@@ -85,6 +104,12 @@ export function LockScreen({
         ) : null}
 
         <form className="lock-form" onSubmit={submit}>
+          {restoring ? (
+            <label className="field">
+              <span>Encrypted backup file</span>
+              <input type="file" accept=".json,application/json" required onChange={(event) => setBackupFile(event.target.files?.[0] ?? null)} />
+            </label>
+          ) : null}
           <label className="field">
             <span>Password</span>
             <input
@@ -110,13 +135,24 @@ export function LockScreen({
             </label>
           ) : null}
 
-          {localError || error ? <p className="error-banner">{localError || error}</p> : null}
+          {localError || error ? <p className="error-banner" role="alert">{localError || error}</p> : null}
 
           <button className="primary-button" type="submit" disabled={submitting}>
             <KeyRound size={18} />
-            {submitting ? "Working" : isCreate ? "Create vault" : "Unlock"}
+            {submitting ? "Working" : restoring ? "Restore backup" : isCreate ? "Create vault" : "Unlock"}
           </button>
         </form>
+        {onRestore ? (
+          <button className="text-button" type="button" disabled={submitting} onClick={() => {
+            setPassword("");
+            setConfirmPassword("");
+            setBackupFile(null);
+            setLocalError("");
+            setRestoreMode(!restoreMode);
+          }}>
+            {restoring ? "Create a new vault instead" : "Restore encrypted backup"}
+          </button>
+        ) : null}
       </section>
     </main>
   );
